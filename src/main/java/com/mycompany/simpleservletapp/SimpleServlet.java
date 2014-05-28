@@ -1,6 +1,7 @@
 package com.mycompany.simpleservletapp;
 
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.math.BigInteger;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -10,7 +11,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.logging.Level;
+import java.sql.Timestamp;
+import java.util.Date;
 import javax.servlet.ServletException;
 import javax.servlet.ServletInputStream;
 import javax.servlet.annotation.WebServlet;
@@ -38,9 +40,6 @@ import org.xml.sax.SAXException;
 public class SimpleServlet extends HttpServlet {
 
     Logger log = LoggerFactory.getLogger(HttpServlet.class);
-    private String requestType;
-    private String loginName;
-    private String password;
 
     Connection conn;
     String driver = "org.apache.derby.jdbc.EmbeddedDriver";
@@ -48,9 +47,16 @@ public class SimpleServlet extends HttpServlet {
     private Statement statement;
     private PreparedStatement pstatement;
 
-    enum Results {
+    enum Result {
 
-        OK, NAME_TAKEN, INVALID_NAME, WRONG_PASSWORD, UNKNOWN_ERROR_CALL_RETRY_LATER
+        OK, NAME_TAKEN, INVALID_NAME, WRONG_PASSWORD, UNKNOWN_ERROR
+    }
+
+    public static class Agent {
+
+        public static String phoneLogin;
+        public static String password;
+        public static Timestamp updTime;
     }
 
     @Override
@@ -79,6 +85,9 @@ public class SimpleServlet extends HttpServlet {
             throws ServletException, IOException {
 
         ServletInputStream inStream = null;
+        String requestType = null;
+        String loginString = "";
+        String password = "";
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             inStream = request.getInputStream();
@@ -88,10 +97,10 @@ public class SimpleServlet extends HttpServlet {
             NodeList requestBody = document.getElementsByTagName("request");
             for (int i = 0; i < requestBody.getLength(); i++) {
                 Node node = requestBody.item(i);
-                if (node.getNodeType() == Node.ELEMENT_NODE && node.getNodeName().contains("request-type")) {
+                if (node.getNodeType() == Node.ELEMENT_NODE) {
                     Element element = (Element) node;
                     requestType = element.getElementsByTagName("request-type").item(0).getTextContent();
-                    loginName = element.getElementsByTagName("login").item(0).getTextContent();
+                    loginString = element.getElementsByTagName("login").item(0).getTextContent();
                     password = element.getElementsByTagName("password").item(0).getTextContent();
                 }
             }
@@ -100,15 +109,52 @@ public class SimpleServlet extends HttpServlet {
         } catch (IOException ex) {
             log.error("IO exception " + ex.getMessage());
         } finally {
-            inStream.close();
+            if (inStream != null) {
+                inStream.close();
+            }
         }
-        switch (requestType) {
-            case "new-agt":
-                createNewAgent();
-                break;
-            case "agt-bal":
-                getAgentBalance();
-                break;
+        Result rv;
+        // проверяем на валидность логина-телефона
+        String md5hash = md5(Agent.phoneLogin);
+        if (md5hash != null) {
+            Agent.phoneLogin = md5hash;
+            Agent.password = password;
+
+            switch (requestType) {
+                case "new-agt":
+                    createNewAgent();
+                    break;
+                case "agt-bal":
+                    getAgentBalance();
+                    break;
+                default:
+                    unknownRequestAnswer();
+            }
+        } else {
+            rv = Result.INVALID_NAME;
+        }
+
+    }
+
+    private void writeXMLAnswer(Result resultCode, HttpServletResponse response) {
+        PrintWriter printWriter = null;
+        try {
+            printWriter = response.getWriter();
+            StringBuilder sfXml = new StringBuilder();
+            response.setContentType("text/xml");
+            sfXml.append("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
+            sfXml.append("<response>\n");
+            sfXml.append("\t<result-code>" + String.valueOf(resultCode) + "</result-code>\n");
+            sfXml.append("</response>\n");
+            printWriter.println(sfXml.toString());
+            printWriter.flush();
+            printWriter.close();
+        } catch (IOException ex) {
+            log.error(ex.getMessage());
+        } finally {
+            if (printWriter != null) {
+                printWriter.close();
+            }
         }
     }
 
@@ -118,8 +164,9 @@ public class SimpleServlet extends HttpServlet {
             PreparedStatement pstatement = conn
                     .prepareStatement("insert into Agent values (?,?,?)");
 
-            pstatement.setString(1, );
-            pstatement.setString(2,);
+            pstatement.setString(1, Agent.phoneLogin);
+            pstatement.setString(2, Agent.password);
+            pstatement.setTimestamp(3, new Timestamp(new Date().getTime()));
 
             pstatement.executeUpdate();
         } catch (SQLException ex) {
@@ -128,12 +175,12 @@ public class SimpleServlet extends HttpServlet {
 
     }
 
-    private String md5(String s) {
+    private String md5(String string) {
         try {
             MessageDigest m = MessageDigest.getInstance("MD5");
-            m.update(s.getBytes(), 0, s.length());
-            BigInteger i = new BigInteger(1, m.digest());
-            return String.format("%1$032x", i);
+            m.update(string.getBytes(), 0, string.length());
+            BigInteger bigint = new BigInteger(1, m.digest());
+            return String.format("%1$032x", bigint);
         } catch (NoSuchAlgorithmException e) {
             log.error(e.getMessage());
         }
@@ -144,30 +191,25 @@ public class SimpleServlet extends HttpServlet {
 
     }
 
-    private Results checkValidations() {
-        Results rv = Results.UNKNOWN_ERROR_CALL_RETRY_LATER;
-        // проверяем на валидность логина-телефона
-        String md5hash = md5(loginName);
-        if (md5hash != null) {
-            int count = 0;
-            try {
-                pstatement = conn.prepareStatement("select * from Agent where PhoneLogin=?");
-                pstatement.setString(1, md5hash);
-                ResultSet resultSet = pstatement.executeQuery();
-                while (resultSet.next()) {
-                    count++;
-                }
-            } catch (SQLException ex) {
-                rv = Results.UNKNOWN_ERROR_CALL_RETRY_LATER;
-                log.error(ex.getMessage());
+    private Result checkValidations(String loginHash) {
+        Result rv = Result.OK;
+        int count = 0;
+        try {
+            pstatement = conn.prepareStatement("select * from Agent where PhoneLogin=?");
+            pstatement.setString(1, loginHash);
+            ResultSet resultSet = pstatement.executeQuery();
+            while (resultSet.next()) {
+                count++;
             }
-            if (count > 0) {
-                rv = Results.NAME_TAKEN;
+        } catch (SQLException ex) {
+            log.error(ex.getMessage());
+            rv = Result.UNKNOWN_ERROR;
+        }
+        if (count > 0) {
+            if (rv == Result.OK) {
+                rv = Result.NAME_TAKEN;
             }
-        } else {
-            return (Results.INVALID_NAME);
         }
         return rv;
     }
-
 }
