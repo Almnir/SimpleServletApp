@@ -13,6 +13,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 import javax.servlet.ServletException;
 import javax.servlet.ServletInputStream;
 import javax.servlet.annotation.WebServlet;
@@ -49,7 +51,7 @@ public class SimpleServlet extends HttpServlet {
 
     enum Result {
 
-        OK, NAME_TAKEN, INVALID_NAME, WRONG_PASSWORD, UNKNOWN_ERROR
+        OK, WRONG_DATA, NAME_TAKEN, INVALID_NAME, WRONG_PASSWORD, UNKNOWN_ERROR
     }
 
     public static class Agent {
@@ -57,6 +59,7 @@ public class SimpleServlet extends HttpServlet {
         public static String phoneLogin;
         public static String password;
         public static Timestamp updTime;
+        private static double funds;
     }
 
     @Override
@@ -70,10 +73,16 @@ public class SimpleServlet extends HttpServlet {
             statement = conn.createStatement();
             statement.executeUpdate(
                     "CREATE TABLE Agent ("
-                    + " ID INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,"
+                    + " ID INTEGER GENERATED ALWAYS AS IDENTITY,"
                     + " PhoneLogin VARCHAR(20) NOT NULL,"
                     + " Password VARCHAR(20) NOT NULL,"
-                    + " UpdTime TIMESTAMP");
+                    + " UpdTime TIMESTAMP, PRIMARY KEY (ID))");
+            statement.executeUpdate(
+                    "CREATE TABLE Balance ("
+                    + " ID INTEGER GENERATED ALWAYS AS IDENTITY,"
+                    + " AccountFunds DOUBLE NOT NULL,"
+                    + " LoginID INTEGER,"
+                    + " UpdTime TIMESTAMP, FOREIGN KEY (LoginID) REFERENCES Agent (ID))");
             statement.close();
         } catch (SQLException | ClassNotFoundException | InstantiationException | IllegalAccessException ex) {
             log.error(ex.getMessage());
@@ -85,9 +94,11 @@ public class SimpleServlet extends HttpServlet {
             throws ServletException, IOException {
 
         ServletInputStream inStream = null;
-        String requestType = null;
+        String requestType = "";
         String loginString = "";
         String password = "";
+        String funds = "";
+        Result resultAnswer = Result.OK;
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             inStream = request.getInputStream();
@@ -102,38 +113,63 @@ public class SimpleServlet extends HttpServlet {
                     requestType = element.getElementsByTagName("request-type").item(0).getTextContent();
                     loginString = element.getElementsByTagName("login").item(0).getTextContent();
                     password = element.getElementsByTagName("password").item(0).getTextContent();
+                    funds = element.getElementsByTagName("funds").item(0).getTextContent();
                 }
             }
         } catch (ParserConfigurationException | SAXException ex) {
             log.error("Parse exception " + ex.getMessage());
+            resultAnswer = Result.WRONG_DATA;
         } catch (IOException ex) {
             log.error("IO exception " + ex.getMessage());
+            resultAnswer = Result.WRONG_DATA;
         } finally {
             if (inStream != null) {
                 inStream.close();
             }
         }
-        Result rv;
         // проверяем на валидность логина-телефона
         String md5hash = md5(Agent.phoneLogin);
         if (md5hash != null) {
             Agent.phoneLogin = md5hash;
             Agent.password = password;
-
+            Agent.funds = Double.parseDouble(funds);
+            
             switch (requestType) {
                 case "new-agt":
                     createNewAgent();
                     break;
+                case "add-funds":
+                    // добавить средства
+                    addFunds();
+                    break;
                 case "agt-bal":
+                    // запросить баланс
                     getAgentBalance();
                     break;
                 default:
-                    unknownRequestAnswer();
+                    resultAnswer = Result.UNKNOWN_ERROR;
             }
         } else {
-            rv = Result.INVALID_NAME;
+            resultAnswer = Result.INVALID_NAME;
         }
 
+    }
+
+    private Map<String, String> checkLoginPassword(String login) {
+        Map<String, String> loginPassword = new HashMap<>();
+        try {
+            pstatement = conn.prepareStatement("select PhoneLogin, Password from Agent"
+                    + "where PhoneLogin = ?");
+
+            pstatement.setString(1, login);
+            ResultSet resultSet = pstatement.executeQuery();
+            if (resultSet.next()) {
+                loginPassword.put(resultSet.getString(0), resultSet.getString(1));
+            }
+        } catch (SQLException ex) {
+            log.error(ex.getMessage());
+        }
+        return loginPassword;
     }
 
     private void writeXMLAnswer(Result resultCode, HttpServletResponse response) {
@@ -161,14 +197,34 @@ public class SimpleServlet extends HttpServlet {
     private void createNewAgent() {
 
         try {
-            PreparedStatement pstatement = conn
-                    .prepareStatement("insert into Agent values (?,?,?)");
+            pstatement = conn
+                    .prepareStatement("insert into Agent(PhoneLogin, Password, UpdTime) values (?,?,?)");
 
             pstatement.setString(1, Agent.phoneLogin);
             pstatement.setString(2, Agent.password);
             pstatement.setTimestamp(3, new Timestamp(new Date().getTime()));
 
             pstatement.executeUpdate();
+        } catch (SQLException ex) {
+            log.error(ex.getMessage());
+        }
+
+    }
+
+    private void addFunds() {
+        try {
+            pstatement = conn
+                    .prepareStatement("insert into Balance(AccountFunds, UpdTime) values (?,?)");
+
+            pstatement.setDouble(1, Agent.funds);
+            pstatement.setTimestamp(2, new Timestamp(new Date().getTime()));
+
+            pstatement.executeUpdate();
+
+            pstatement = conn
+                    .prepareStatement("update Balance set Balance.LoginID = (select Agent.ID from Agent where Agent.PhoneLogin = ?)");
+
+            pstatement.setString(1, Agent.phoneLogin);
         } catch (SQLException ex) {
             log.error(ex.getMessage());
         }
@@ -187,11 +243,25 @@ public class SimpleServlet extends HttpServlet {
         return null;
     }
 
-    private void getAgentBalance() {
+    private Double getAgentBalance() {
+        Double rv = null;
+        try {
+            pstatement = conn.prepareStatement("select b.AccountFunds from Balance b, Agent a "
+                    + " where a.ID = b.LoginID"
+                    + " and a.PhoneLogin = ?");
+            pstatement.setString(1, Agent.phoneLogin);
+            ResultSet resultSet = pstatement.executeQuery();
+            if (resultSet.next()) {
+                rv = resultSet.getDouble(1);
+            }
 
+        } catch (SQLException ex) {
+            log.error(ex.getMessage());
+        }
+        return rv;
     }
 
-    private Result checkValidations(String loginHash) {
+    private Result getBalance(String loginHash) {
         Result rv = Result.OK;
         int count = 0;
         try {
