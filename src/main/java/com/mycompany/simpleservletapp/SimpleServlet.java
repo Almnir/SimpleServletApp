@@ -40,7 +40,7 @@ import org.xml.sax.SAXException;
 @WebServlet(urlPatterns = "/simple")
 public class SimpleServlet extends HttpServlet {
 
-    Logger log = LoggerFactory.getLogger(HttpServlet.class);
+    Logger log = LoggerFactory.getLogger(SimpleServlet.class);
 
     /**
      * Строка драйвера БД
@@ -57,7 +57,7 @@ public class SimpleServlet extends HttpServlet {
     /**
      * Перечисление результирующих кодов
      */
-    enum Result {
+    public enum Result {
 
         OK, WRONG_DATA, NAME_TAKEN, INVALID_NAME, WRONG_PASSWORD, UNKNOWN_ERROR
     }
