@@ -33,19 +33,24 @@ import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
 /**
- * Простейший сервлет принимающий 2 POST запроса в XML формате и выдающий XML
- * ответа
+ * Простой сервлет принимающий 2 POST запроса в XML формате и выдающий XML ответ
  *
- * @author alm (Ярных А.О.)
+ * @author (Ярных А.О.)
  */
 @WebServlet(urlPatterns = "/simple")
 public class SimpleServlet extends HttpServlet {
 
     Logger log = LoggerFactory.getLogger(HttpServlet.class);
 
-    Connection conn;
+    /**
+     * Строка драйвера БД
+     */
     String driver = "org.apache.derby.jdbc.EmbeddedDriver";
+    /**
+     * Строка соединения с базой данных
+     */
     String connectionURL = "jdbc:derby:servletDatabase;create=true";
+    Connection conn;
     private Statement statement;
     private PreparedStatement pstatement;
 
@@ -54,11 +59,11 @@ public class SimpleServlet extends HttpServlet {
      */
     enum Result {
 
-        OK, WRONG_DATA, NAME_TAKEN, INVALID_NAME, WRONG_PASSWORD, DATABASE_ERROR, UNKNOWN_ERROR
+        OK, WRONG_DATA, NAME_TAKEN, INVALID_NAME, WRONG_PASSWORD, UNKNOWN_ERROR
     }
 
     /**
-     * Класс состояния
+     * Класс состояния (мог бы быть более ёмким)
      */
     public static class Answer {
 
@@ -66,7 +71,7 @@ public class SimpleServlet extends HttpServlet {
     }
 
     /**
-     * Класс агента
+     * Класс клиента
      */
     public static class Agent {
 
@@ -106,7 +111,6 @@ public class SimpleServlet extends HttpServlet {
             statement.close();
         } catch (SQLException | ClassNotFoundException | InstantiationException | IllegalAccessException ex) {
             log.error(ex.getMessage());
-            Answer.resultCode = Result.DATABASE_ERROR;
         }
     }
 
@@ -128,6 +132,7 @@ public class SimpleServlet extends HttpServlet {
         String password = "";
         String funds = "";
         try {
+            // разбор DOM XML
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             inStream = request.getInputStream();
             DocumentBuilder parser = factory.newDocumentBuilder();
@@ -172,12 +177,12 @@ public class SimpleServlet extends HttpServlet {
                         Answer.resultCode = Result.NAME_TAKEN;
                     }
                     break;
-                case "add-funds":
-                    if (loginPassword!= null && !loginPassword.isEmpty()) {
+                case "set-funds":
+                    if (loginPassword != null && !loginPassword.isEmpty()) {
                         // проверка на совпадение пароля
                         if (loginPassword.get(Agent.phoneLogin).equals(Agent.password)) {
-                            // добавить средства
-                            addFunds();
+                            // установить средства
+                            setFunds();
                         } else {
                             Answer.resultCode = Result.WRONG_PASSWORD;
                         }
@@ -195,7 +200,7 @@ public class SimpleServlet extends HttpServlet {
                     break;
                 default:
                     if (Answer.resultCode == Result.OK) {
-                        Answer.resultCode = Result.WRONG_DATA; 
+                        Answer.resultCode = Result.WRONG_DATA;
                     }
             }
         } else {
@@ -232,6 +237,12 @@ public class SimpleServlet extends HttpServlet {
         return loginPassword;
     }
 
+    /**
+     * Возврат ответа в XML
+     *
+     * @param resultCode, Result код возврата
+     * @param response, HttpServletResponse
+     */
     private void writeXMLAnswer(Result resultCode, HttpServletResponse response) {
         PrintWriter printWriter = null;
         try {
@@ -254,6 +265,9 @@ public class SimpleServlet extends HttpServlet {
         }
     }
 
+    /**
+     * Создание нового клиента
+     */
     private void createNewAgent() {
 
         try {
@@ -271,7 +285,10 @@ public class SimpleServlet extends HttpServlet {
 
     }
 
-    private void addFunds() {
+    /**
+     * Запись средств на счёт
+     */
+    private void setFunds() {
         try {
             pstatement = conn
                     .prepareStatement("insert into Balance(accountfunds, updtime) values (?,?)");
@@ -291,6 +308,12 @@ public class SimpleServlet extends HttpServlet {
 
     }
 
+    /**
+     * Получение md5 строки
+     *
+     * @param string, входная строка
+     * @return string, md5 строка
+     */
     private String md5(String string) {
         try {
             MessageDigest m = MessageDigest.getInstance("MD5");
@@ -303,6 +326,11 @@ public class SimpleServlet extends HttpServlet {
         return null;
     }
 
+    /**
+     * Метод получения баланса счёта
+     *
+     * @return Double, сумма
+     */
     private Double getAgentBalance() {
         Double rv = null;
         try {
