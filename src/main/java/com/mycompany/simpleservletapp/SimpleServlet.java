@@ -176,6 +176,8 @@ public class SimpleServlet extends HttpServlet {
                     } else {
                         Answer.resultCode = Result.NAME_TAKEN;
                     }
+                    // ответ в XML
+                    writeResultAnswer(Answer.resultCode, response);
                     break;
                 case "set-funds":
                     if (loginPassword != null && !loginPassword.isEmpty()) {
@@ -189,25 +191,35 @@ public class SimpleServlet extends HttpServlet {
                     } else {
                         Answer.resultCode = Result.INVALID_NAME;
                     }
+                    // ответ в XML
+                    writeResultAnswer(Answer.resultCode, response);
                     break;
                 case "agt-bal":
+                    Double balance = null;
                     if (!loginPassword.isEmpty()) {
                         // запросить баланс
-                        getAgentBalance();
+                        balance = getAgentBalance();
                     } else {
                         Answer.resultCode = Result.INVALID_NAME;
+                    }
+                    if (balance != null) {
+                        // записать ответ баланса
+                        writeBalanceAnswer(balance, response);
                     }
                     break;
                 default:
                     if (Answer.resultCode == Result.OK) {
                         Answer.resultCode = Result.WRONG_DATA;
                     }
+                    // ответ в XML
+                    writeResultAnswer(Answer.resultCode, response);
+                    break;
             }
         } else {
             Answer.resultCode = Result.INVALID_NAME;
+            // ответ в XML
+            writeResultAnswer(Answer.resultCode, response);
         }
-        // ответ в XML
-        writeXMLAnswer(Answer.resultCode, response);
     }
 
     /**
@@ -243,7 +255,7 @@ public class SimpleServlet extends HttpServlet {
      * @param resultCode, Result код возврата
      * @param response, HttpServletResponse
      */
-    private void writeXMLAnswer(Result resultCode, HttpServletResponse response) {
+    private void writeResultAnswer(Result resultCode, HttpServletResponse response) {
         PrintWriter printWriter = null;
         try {
             printWriter = response.getWriter();
@@ -252,6 +264,34 @@ public class SimpleServlet extends HttpServlet {
             sfXml.append("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
             sfXml.append("<response>\n");
             sfXml.append("\t<result-code>" + String.valueOf(resultCode) + "</result-code>\n");
+            sfXml.append("</response>\n");
+            printWriter.println(sfXml.toString());
+            printWriter.flush();
+            printWriter.close();
+        } catch (IOException ex) {
+            log.error(ex.getMessage());
+        } finally {
+            if (printWriter != null) {
+                printWriter.close();
+            }
+        }
+    }
+
+    /**
+     * Ответ в виде баланса счёта клиента
+     *
+     * @param balance, double, баланс
+     * @param response, HttpServletResponse
+     */
+    private void writeBalanceAnswer(double balance, HttpServletResponse response) {
+        PrintWriter printWriter = null;
+        try {
+            printWriter = response.getWriter();
+            StringBuilder sfXml = new StringBuilder();
+            response.setContentType("text/xml");
+            sfXml.append("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
+            sfXml.append("<response>\n");
+            sfXml.append("\t<balance>" + String.valueOf(balance) + "</balance>\n");
             sfXml.append("</response>\n");
             printWriter.println(sfXml.toString());
             printWriter.flush();
